@@ -1,0 +1,39 @@
+{
+  "feature_frames": 1152,
+  "log_gain_max_absolute_error": 1.5497207641601562e-06,
+  "log_gain_mean_absolute_error": 9.927176591872922e-08,
+  "pcm_cases": [
+    {
+      "case": "tones_noise_and_silence",
+      "samples_per_channel": 81920,
+      "max_absolute_error": 8.936922112068313e-09,
+      "rms_error": 1.024651029432362e-09,
+      "native_seconds": 0.03826779999999985,
+      "audio_seconds": 1.7066666666666668,
+      "realtime_factor": 0.022422539062499913,
+      "stereo_independence": true
+    }
+  ],
+  "strength_cases": [
+    {
+      "strength": 0.0,
+      "max_absolute_error": 6.12518565729081e-09,
+      "rms_error": 9.912051106406825e-10
+    },
+    {
+      "strength": 0.6,
+      "max_absolute_error": 6.12518565729081e-09,
+      "rms_error": 1.000300017831732e-09
+    },
+    {
+      "strength": 0.735,
+      "max_absolute_error": 6.184334613856812e-09,
+      "rms_error": 1.0051319781822877e-09
+    },
+    {
+      "strength": 1.0,
+      "max_absolute_error": 8.936922112068313e-09,
+      "rms_error": 1.024651029432362e-09
+    }
+  ]
+}

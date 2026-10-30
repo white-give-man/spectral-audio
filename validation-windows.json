@@ -1,0 +1,21 @@
+{
+  "environment": "Windows process execution; no audio device installation",
+  "processor": "PASS strength_values=1001 processor_cases=18 streaming_bit_identity=1 latency_frames=1024 allocations=0",
+  "apo_abi": "PASS class=unity latency_100ns=0\nPASS class=original-dsp latency_100ns=213334\nPASS COM aggregation identity and lifetime (both classes)\nPASS engine_init=RAW\nPASS engine_init=discovery-only\nIsolated DLL ABI test only; no endpoint association or audiodg measurement.",
+  "model_slots": 25,
+  "available_slots": [
+    {
+      "game": 2,
+      "level": 4
+    }
+  ],
+  "model_probe_frames": 1024,
+  "log_gain_max_absolute_error": 1.5497207641601562e-06,
+  "binaries": {
+    "SpectralAudio.dll": "a057e812c7d1c89dc59f84979e1a2635c10e4b59f656ac140b9841e4af8b9e80",
+    "spectral_apo_processor_unit.exe": "0801f9f31eafbfaf2c53a78d4061321b00f7d2ddbfd320a99eb533561cd1a92b",
+    "spectral_apo_runtime.exe": "ddf2f6a297e330c64dacdcaf1287e6d8d321da59b096f6a4f18b007d2a418dc8",
+    "spectral_apo_measure.exe": "da1262b5773cef6d10d473c4cf1d011c950fba77810b1e0350758f5ba1d7ba06",
+    "spectral_apo_smoke.exe": "d6fea8243a7d5697ac67382d08dc4cb9b674195d34054846242a1bd017132c49"
+  }
+}

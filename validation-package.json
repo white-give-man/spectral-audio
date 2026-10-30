@@ -1,0 +1,36 @@
+{
+  "architecture": "Windows x64",
+  "compiler": "MSVC 19.50 / Windows SDK 10.0.26100.0",
+  "runtime_imports": {
+    "spectral_apo_measure.exe": [
+      "ole32.dll",
+      "KERNEL32.dll"
+    ],
+    "spectral_apo_processor_unit.exe": [
+      "KERNEL32.dll"
+    ],
+    "spectral_apo_runtime.exe": [
+      "KERNEL32.dll"
+    ],
+    "spectral_apo_smoke.exe": [
+      "ole32.dll",
+      "KERNEL32.dll"
+    ],
+    "SpectralAudio.dll": [
+      "ole32.dll",
+      "ADVAPI32.dll",
+      "KERNEL32.dll"
+    ]
+  },
+  "powershell_syntax_files": 9,
+  "panel_strength_publication_percent": [
+    0,
+    60,
+    73.5,
+    100
+  ],
+  "panel_output_gain_independent": true,
+  "legacy_settings_compatible": true,
+  "continuous_strength_round_trip_values": 1001,
+  "target_audio_device_test": "not performed"
+}

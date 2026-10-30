@@ -1,0 +1,6 @@
+Spectral Audio uses Windows COM/APO interfaces supplied by the Windows SDK.
+The current Windows binaries were compiled with Microsoft Visual C++ and the Windows SDK.
+MinGW runtime notices: MINGW-COPYING (included in the distribution).
+Alternative MinGW builds link GCC/libstdc++ under their applicable runtime exceptions.
+Model source artifacts are supplied by the project owner and are unencrypted.
+NumPy and PyTorch are development/export/verification tools only; neither runtime is distributed.

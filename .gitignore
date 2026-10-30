@@ -1,0 +1,6 @@
+build*/
+/dist/*
+!/dist/SpectralAudio-win11-x64-1.0.0.zip
+!/dist/SpectralAudio-source-1.0.0.zip
+__pycache__/
+*.pyc

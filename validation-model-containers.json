@@ -1,0 +1,18 @@
+{
+  "tensor_values_exact": true,
+  "torchscript_outputs_and_states_exact": true,
+  "max_absolute_error": 0.0,
+  "checkpoint_keys": [
+    "hidden",
+    "mean",
+    "state_dict",
+    "std"
+  ],
+  "debug_records_included": false,
+  "files": {
+    "predictor.ts": "514a090e12b3ef85ddb0fc46293759add10efe67477fb38b38871788013a44ae",
+    "predictor.pt": "8dfec9fbf5680ddf58a868b7debcd7931f08b9eea0f38dc930a7e8330f95bf26",
+    "predictor.norm.npz": "e70ab35bc8c4f870490b119beb887f15415b860fa68ebade3d012612ee502299",
+    "filterbanks.npz": "b02dfa076f6e1bec39565cf8f7d578f7de585b878ae44aa9d69976b721fd1793"
+  }
+}
