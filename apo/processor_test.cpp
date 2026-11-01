@@ -35,11 +35,16 @@ int main() {
     }
     require(Settings::unpack(97538).strength_milli == 1000 && Settings{}.pack() == 97538,
             "legacy settings retain full strength and wire identity");
-    for (unsigned strength=0; strength<=1000; ++strength) {
+    for (unsigned strength=0; strength<=2000; ++strength) {
         Settings s{2,4,false,735,strength};
         const auto d=Settings::unpack(s.pack());
         require(d.valid() && d.strength_milli==strength && d.gain_milli==735 && d.game==2 && d.level==4,
                 "continuous strength and volume round trip independently");
+        if (strength<=1000) {
+            const uint32_t legacy_word = (Settings{2,4,false,735}.pack() & ~(1u << 27)) |
+                (strength==1000 ? 0u : ((strength << 17) | (1u << 27)));
+            require(s.pack()==legacy_word,"existing strength settings preserve wire identity");
+        }
         const double amount=strength/1000.;
         require(std::abs(spectral::shaped_gain(std::log(16.),amount)-std::pow(16.,amount))<1e-12,
                 "positive gains follow the continuous exponent curve");
@@ -47,13 +52,14 @@ int main() {
                 "attenuation remains independent of enhancement strength");
     }
     auto* stream=spectral_stream_create(2,4,2,0);
-    require(stream && spectral_stream_set_strength(stream,0)==0 && spectral_stream_set_strength(stream,1)==0,
+    require(stream && spectral_stream_set_strength(stream,0)==0 && spectral_stream_set_strength(stream,1)==0 &&
+            spectral_stream_set_strength(stream,2)==0,
             "strength endpoints accepted");
-    require(spectral_stream_set_strength(stream,-.1f)!=0 && spectral_stream_set_strength(stream,1.1f)!=0 &&
+    require(spectral_stream_set_strength(stream,-.1f)!=0 && spectral_stream_set_strength(stream,2.001f)!=0 &&
             spectral_stream_set_strength(stream,std::numeric_limits<float>::quiet_NaN())!=0 &&
             spectral_stream_set_strength(nullptr,.5f)!=0,"invalid strength rejected");
     spectral_stream_destroy(stream);
-    constexpr size_t frames = Spectral_HOP*16;
+    constexpr size_t frames = Spectral_HOP*32;
     std::vector<float> input(frames*2), reference(frames*2), result(frames*2);
     uint32_t random = 34567;
     for (auto& v : input) {
@@ -104,7 +110,7 @@ int main() {
     require(dry.reset(),"reset");
     require(dry.process(input.data(),reference.data(),frames,false,silent) && reference == result,"reset replay identity");
     require(!dry.publish({5,0,false,1000}) && !dry.publish({0,5,false,1000}) &&
-        !dry.publish({0,0,false,1001}) && !dry.publish({2,4,false,1000,1001}),"invalid configuration rejected");
+        !dry.publish({0,0,false,1001}) && !dry.publish({2,4,false,1000,2001}),"invalid configuration rejected");
     require(!dry.publish({0,0,false,1000}),"unavailable model rejected without changing audio state");
     require(!dry.process(nullptr,result.data(),1,false,silent),"invalid nonsilent input rejected");
     require(dry.process(nullptr,nullptr,0,true,silent),"empty callback");
@@ -118,15 +124,15 @@ int main() {
     input[0]=input[1]=input[2]=input[3]=0;
     // A control arriving partway through a hop is applied at the same sample
     // regardless of how the host divides the following callbacks.
-    Processor a,b;
+    Processor a({2,4,false,1000,0}),b({2,4,false,1000,0});
     require(a.process(input.data(),result.data(),37,false,silent),"config prefix a");
     require(b.process(input.data(),reference.data(),37,false,silent),"config prefix b");
-    require(a.publish({2,4,false,735,600}) && b.publish({2,4,false,735,600}),"publish control snapshot");
+    require(a.publish({2,4,false,735,2000}) && b.publish({2,4,false,735,2000}),"publish control snapshot");
     require(a.process(input.data()+74,result.data()+74,frames-37,false,silent),"config suffix a");
     for (size_t f=37;f<frames;++f)
         require(b.process(input.data()+2*f,reference.data()+2*f,1,false,silent),"config suffix b");
     require(result == reference,"block-boundary strength/volume switching independent of fragmentation");
-    require(a.reset() && b.reset(),"reset with reduced strength");
+    require(a.reset() && b.reset(),"reset with 200 percent strength");
     require(a.process(input.data(),result.data(),frames,false,silent) &&
             b.process(input.data(),reference.data(),frames,false,other) && result==reference,
             "strength reset replay identity");
@@ -134,6 +140,20 @@ int main() {
     require(full.process(input.data(),reference.data(),frames,false,other) &&
             reduced.process(input.data(),result.data(),frames,false,silent) && result!=reference,
             "strength reaches the model spectral path");
-    std::printf("PASS strength_values=1001 processor_cases=%zu streaming_bit_identity=1 latency_frames=%zu allocations=%zu\n",
+    // Verify the maximum strength through the packed APO settings and actual DSP.
+    spectral::SingleClockCore maximum_core{2,4};
+    require(maximum_core.set_strength(2.f) && maximum_core.reset(),"maximum core strength");
+    Processor maximum({2,4,false,1000,2000});
+    require(maximum_core.process(input.data(),reference.data(),frames),"maximum core render");
+    track=true;
+    const bool maximum_ok=maximum.process(input.data(),result.data(),frames,false,silent);
+    track=false;
+    require(maximum_ok && allocations==0,"maximum strength is allocation free");
+    require(Settings::unpack(maximum.applied_settings()).strength_milli==2000,
+            "maximum strength applied without truncation");
+    for (size_t i=0;i<result.size();++i)
+        require(std::isfinite(result[i]) && result[i]==std::clamp(reference[i],-1.f,1.f),
+                "maximum APO strength matches the core with output limiting");
+    std::printf("PASS strength_values=2001 processor_cases=%zu streaming_bit_identity=1 latency_frames=%zu allocations=%zu\n",
         cases,Processor::latency_frames,allocations);
 }

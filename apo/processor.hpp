@@ -12,18 +12,19 @@ struct Settings {
     unsigned game = 2, level = 4;
     bool bypass = false;
     unsigned gain_milli = 1000; // 0..1000; output is always limited to [-1,1].
-    unsigned strength_milli = 1000; // 0..1000; independent of output volume.
-    bool valid() const noexcept { return game < 5 && level < 5 && gain_milli <= 1000 && strength_milli <= 1000; }
-    // Bit 27 marks an explicit strength in bits 17..26; absent means legacy 100%.
+    unsigned strength_milli = 1000; // 0..2000; independent of output volume.
+    bool valid() const noexcept { return game < 5 && level < 5 && gain_milli <= 1000 && strength_milli <= 2000; }
+    // Bit 27 marks explicit strength: low 10 bits in 17..26, high bit in 28.
+    // Existing 0..100% words and the absent-marker default keep their wire identity.
     uint32_t pack() const noexcept {
         return (game & 3u) | ((game & 4u) << 13) | ((level & 3u) << 2) |
                ((level & 4u) << 14) | (unsigned(bypass) << 4) | (gain_milli << 5) |
-               (strength_milli == 1000 ? 0u : ((strength_milli << 17) | (1u << 27)));
+               (strength_milli == 1000 ? 0u : (((strength_milli & 1023u) << 17) | ((strength_milli & 1024u) << 18) | (1u << 27)));
     }
     static Settings unpack(uint32_t v) noexcept {
         return {(v & 3u) | ((v >> 13) & 4u), ((v >> 2) & 3u) | ((v >> 14) & 4u),
                 bool(v & 16), (v >> 5) & 1023u,
-                (v & (1u << 27)) ? ((v >> 17) & 1023u) : 1000u};
+                (v & (1u << 27)) ? (((v >> 17) & 1023u) | ((v >> 18) & 1024u)) : 1000u};
     }
 };
 

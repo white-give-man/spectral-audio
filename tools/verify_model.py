@@ -59,7 +59,7 @@ for label,audio in cases:
  assert np.max(np.abs(one[:,1]))==0
  report['pcm_cases'].append({'case':label,'samples_per_channel':len(audio),'max_absolute_error':float(error.max()),'rms_error':float(np.sqrt(np.mean(error**2))),'native_seconds':seconds,'audio_seconds':len(audio)/48000,'realtime_factor':seconds/(len(audio)/48000),'stereo_independence':True})
 report['strength_cases']=[]
-for amount in (0.,.6,.735,1.):
+for amount in (0.,.6,.735,1.,1.5,2.):
  value=float(np.float32(amount))
  assert lib.spectral_render_strength(padded.ctypes.data,output.ctypes.data,len(padded)//512,0,value)==0
  expected=render_reference(audio,value);error=np.abs(output[512:]-expected)

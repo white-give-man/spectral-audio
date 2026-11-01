@@ -37,11 +37,19 @@ $null=Label '游戏模型' 48 275 160 28
 $game=New-Object Windows.Forms.ComboBox;$game.DropDownStyle='DropDownList';$game.Location=New-Object Drawing.Point(48,309);$game.Size=New-Object Drawing.Size(240,32)
 $script:modelCatalog=(& $cli models | ConvertFrom-Json)
 if($LASTEXITCODE -ne 0 -or $script:modelCatalog.Count -ne 25){throw '模型目录读取失败。'}
-$gameNames=@('CS2 / Counter-Strike 2','PUBG / 绝地求生','三角洲 / Delta Force','瓦罗兰特 / VALORANT','APEX / Apex Legends')
-for($i=0;$i -lt 5;$i++){$suffix=if(@($script:modelCatalog | Where-Object {$_.game -eq $i -and $_.available}).Count){''}else{'（待接入）'};$null=$game.Items.Add($gameNames[$i]+$suffix)}
+# UI positions are independent of the stable game IDs encoded in settings.
+$script:gameOptions=@(
+    @{Id=1;Name='PUBG / 绝地求生'},
+    @{Id=2;Name='三角洲 / Delta Force'}
+)
+foreach($option in $script:gameOptions){$suffix=if(@($script:modelCatalog | Where-Object {$_.game -eq $option.Id -and $_.available}).Count){''}else{'（待接入）'};$null=$game.Items.Add($option.Name+$suffix)}
+function Select-SpectralGame([int]$gameId) {
+    $game.SelectedIndex=1 # Delta Force is the available default for removed/unknown IDs.
+    for($i=0;$i -lt $script:gameOptions.Count;$i++){if($script:gameOptions[$i].Id -eq $gameId){$game.SelectedIndex=$i;break}}
+}
 $form.Controls.Add($game)
 $null=Label '增益强度（%）' 314 275 170 28
-$strength=New-Object Windows.Forms.NumericUpDown;$strength.Location=New-Object Drawing.Point(314,309);$strength.Size=New-Object Drawing.Size(150,32);$strength.Minimum=0;$strength.Maximum=100;$strength.DecimalPlaces=1;$strength.Increment=1;$strength.Value=100;$form.Controls.Add($strength)
+$strength=New-Object Windows.Forms.NumericUpDown;$strength.Location=New-Object Drawing.Point(314,309);$strength.Size=New-Object Drawing.Size(150,32);$strength.Minimum=0;$strength.Maximum=200;$strength.DecimalPlaces=1;$strength.Increment=1;$strength.Value=100;$form.Controls.Add($strength)
 $null=Label '输出增益（dB）' 494 275 278 28
 $gain=New-Object Windows.Forms.NumericUpDown;$gain.Location=New-Object Drawing.Point(494,309);$gain.Size=New-Object Drawing.Size(120,32);$gain.Minimum=-60;$gain.Maximum=0;$gain.DecimalPlaces=1;$gain.Increment=0.5;$form.Controls.Add($gain)
 $gainPercent=Label '100.0%' 626 309 146 32
@@ -75,7 +83,7 @@ $mute.Add_CheckedChanged({
         Update-SpectralGainDisplay
     }
 })
-$bypass=New-Object Windows.Forms.CheckBox;$bypass.Text='旁路增强（仍保留 1024 帧延迟）';$bypass.Location=New-Object Drawing.Point(48,367);$bypass.Size=New-Object Drawing.Size(390,30);$form.Controls.Add($bypass)
+$bypass=New-Object Windows.Forms.CheckBox;$bypass.Text='恢复原音';$bypass.Location=New-Object Drawing.Point(48,367);$bypass.Size=New-Object Drawing.Size(390,30);$form.Controls.Add($bypass)
 $apply=New-Object Windows.Forms.Button;$apply.Text='应用设置';$apply.Location=New-Object Drawing.Point(582,363);$apply.Size=New-Object Drawing.Size(190,38);$form.Controls.Add($apply)
 $message=Label '设置在音频帧边界应用；窗口显示回调确认后才认为已应用。' 48 412 724 34
 function Button([string]$text,[int]$x){$b=New-Object Windows.Forms.Button;$b.Text=$text;$b.Location=New-Object Drawing.Point($x,496);$b.Size=New-Object Drawing.Size(174,40);$form.Controls.Add($b);return $b}
@@ -112,19 +120,29 @@ function Read-SpectralPanelTarget {
 $intro.Tag='muted';$message.Tag='muted'
 Set-SpectralTheme $form $apply
 Add-SpectralHeader $form 'Spectral Audio  /  频谱音频增强 1.0.0'
+$projectLink=New-Object Windows.Forms.LinkLabel
+$projectLink.Name='ProjectLink';$projectLink.Text='查看更新 · 反馈问题 · 给作者点star'
+$projectLink.SetBounds(396,858,400,26);$projectLink.Anchor='Bottom,Right';$projectLink.TextAlign='MiddleRight'
+$projectLink.LinkColor=$script:SpectralAccent;$projectLink.ActiveLinkColor=$script:SpectralInk;$projectLink.VisitedLinkColor=$script:SpectralAccent
+$projectLink.BackColor=$script:SpectralBackground
+$projectLink.Add_LinkClicked({
+    try{Start-Process 'https://github.com/white-give-man/spectral-audio'}catch{$message.Text='无法打开项目主页：'+$_.Exception.Message}
+})
+$form.Controls.Add($projectLink)
 $script:modelLevel=4;$script:prior=@{};$script:wanted=$null
 $settingsPath=Join-Path $state 'panel-settings.json'
 try{
     $r=(& $cli status | ConvertFrom-Json);if($r.error -ne 0){throw '尚无运行状态文件。安装后再读取。'};$word=[uint32]$r.settings
 
-    $selected=[int](($word -band 3) -bor (($word -shr 13) -band 4));if($selected -gt 4){$selected=0}
-    $strength.Value=if($word -band (1 -shl 27)){[decimal]([Math]::Min(1000,(($word -shr 17) -band 1023))/10.0)}else{100}
-    $game.SelectedIndex=$selected;Set-SpectralGainMilli ([int](($word -shr 5) -band 1023));$bypass.Checked=($word -band 16) -ne 0
-}catch{$game.SelectedIndex=2;$strength.Value=100;Set-SpectralGainMilli 1000;$details.Text=$_.Exception.Message}
+    $selected=[int](($word -band 3) -bor (($word -shr 13) -band 4))
+    $strength.Value=if($word -band (1 -shl 27)){[decimal]([Math]::Min(2000,((($word -shr 17) -band 1023) -bor (($word -shr 18) -band 1024)))/10.0)}else{100}
+    Select-SpectralGame $selected;Set-SpectralGainMilli ([int](($word -shr 5) -band 1023));$bypass.Checked=($word -band 16) -ne 0
+}catch{Select-SpectralGame 2;$strength.Value=100;Set-SpectralGainMilli 1000;$details.Text=$_.Exception.Message}
 $apply.Add_Click({
     try{
-        if(-not @($script:modelCatalog | Where-Object {$_.game -eq $game.SelectedIndex -and $_.level -eq $script:modelLevel -and $_.available}).Count){throw '此游戏暂未接入模型。当前版本支持三角洲 / Delta Force。'}
-        $word=[uint32](($game.SelectedIndex -band 3) -bor (($game.SelectedIndex -band 4) -shl 13) -bor (($script:modelLevel -band 3) -shl 2) -bor (($script:modelLevel -band 4) -shl 14) -bor ([int]$bypass.Checked -shl 4) -bor ($(if($mute.Checked){0}else{$script:gainMilli}) -shl 5) -bor $(if($strength.Value -eq 100){0}else{([int]($strength.Value*10) -shl 17) -bor (1 -shl 27)}))
+        $gameId=$script:gameOptions[$game.SelectedIndex].Id
+        if(-not @($script:modelCatalog | Where-Object {$_.game -eq $gameId -and $_.level -eq $script:modelLevel -and $_.available}).Count){throw '此游戏暂未接入模型。当前版本支持三角洲 / Delta Force。'}
+        $word=[uint32](($gameId -band 3) -bor (($gameId -band 4) -shl 13) -bor (($script:modelLevel -band 3) -shl 2) -bor (($script:modelLevel -band 4) -shl 14) -bor ([int]$bypass.Checked -shl 4) -bor ($(if($mute.Checked){0}else{$script:gainMilli}) -shl 5) -bor $(if($strength.Value -eq 100){0}else{(([int]($strength.Value*10) -band 1023) -shl 17) -bor (([int]($strength.Value*10) -band 1024) -shl 18) -bor (1 -shl 27)}))
         $result=& $cli set ([string]$word);if($LASTEXITCODE){throw "设置未发布：$result"}
         @{strength_milli=[int]($strength.Value*10);settings=$word} | ConvertTo-Json | Set-Content $settingsPath -Encoding UTF8
         $script:wanted=$word;$message.Text='参数已发布，等待目标端点的 audiodg 处理回调确认。'

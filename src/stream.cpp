@@ -50,7 +50,7 @@ struct spectral_stream {
             if(!std::isfinite(v)||v < -1 || v > 1)return false;
             current[ch][i]=double(v)*32768.;
         }
-        // Ramp over at most ten hops (~107 ms), shared by both channels.
+        // Ramp over at most twenty hops (~213 ms), shared by both channels.
         strength += std::clamp(target_strength-strength, -.1, .1);
         for(int ch=0;ch<channels;++ch) {
             std::array<std::complex<double>,1024> spectrum{};
@@ -111,7 +111,7 @@ int spectral_stream_configure(spectral_stream* s,int preset,int level){
     return 0;
 }
 int spectral_stream_set_strength(spectral_stream* s,float strength){
-    if(!s||!std::isfinite(strength)||strength<0||strength>1)return -1;
+    if(!s||!std::isfinite(strength)||strength<0||strength>2)return -1;
     s->target_strength=strength;return 0;
 }
 int spectral_stream_reset(spectral_stream* s){if(!s)return -1;s->reset();return 0;}
