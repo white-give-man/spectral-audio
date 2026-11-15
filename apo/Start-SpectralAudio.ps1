@@ -20,7 +20,7 @@ try {
     $progressFile=Join-Path $logDirectory 'progress.txt'
     $stdout=Join-Path $logDirectory 'output.txt';$stderr=Join-Path $logDirectory 'error.txt'
     $form=New-Object Windows.Forms.Form
-    $form.Text='Spectral Audio 1.0.0 · 安装';$form.ClientSize=New-Object Drawing.Size(740,370)
+    $form.Text='Spectral Audio 1.1.0 · 安装';$form.ClientSize=New-Object Drawing.Size(740,370)
     $form.StartPosition='CenterScreen';$form.FormBorderStyle='FixedDialog';$form.MaximizeBox=$false
     $form.Font=New-Object Drawing.Font('Microsoft YaHei UI',10)
     $label=New-Object Windows.Forms.Label;$label.SetBounds(48,145,644,60)
@@ -33,7 +33,7 @@ try {
     $elapsed=New-Object Windows.Forms.Label;$elapsed.Text='已用时间  00:00';$elapsed.SetBounds(510,116,180,25);$elapsed.TextAlign='MiddleRight';$form.Controls.Add($elapsed)
     $hint.Tag='header'
     Set-SpectralTheme $form $null
-    Add-SpectralHeader $form '耳机增强  /  安装向导 · 1.0.0'
+    Add-SpectralHeader $form '耳机增强  /  安装向导 · 1.1.0'
     $form.Add_FormClosing({param($sender,$eventArgs) if(-not $script:finished){$eventArgs.Cancel=$true}})
     $form.Show();[Windows.Forms.Application]::DoEvents()
     if($SelfTest){
@@ -49,7 +49,7 @@ try {
     while(-not $process.HasExited){
         if(Test-Path -LiteralPath $progressFile){try{$label.Text=[IO.File]::ReadAllText($progressFile,[Text.Encoding]::UTF8)}catch{}}
         $elapsed.Text='已用时间  '+$clock.Elapsed.ToString('mm\:ss')
-        $form.Text='Spectral Audio 1.0.0 · 安装 · '+[int]$clock.Elapsed.TotalSeconds+' 秒'
+        $form.Text='Spectral Audio 1.1.0 · 安装 · '+[int]$clock.Elapsed.TotalSeconds+' 秒'
         [Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 100
     }
     $process.WaitForExit();$exitCode=$process.ExitCode

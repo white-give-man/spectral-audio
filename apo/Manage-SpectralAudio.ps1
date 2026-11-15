@@ -174,6 +174,13 @@ function Remove-OwnedInstallFiles {
     if(-not @(Get-ChildItem -LiteralPath $installRoot -Force).Count){Remove-Item -LiteralPath $installRoot -Force}
 }
 function Set-Word([string]$dir,[uint32]$word) {Run-Exe (Join-Path $dir 'spectral_apo_runtime.exe') @('set',[string]$word) | Out-Null}
+function Set-Equalizer([string]$dir,$eq,[switch]$Disable) {
+    if($null -eq $eq){return}
+    $enabled=[int]($eq.enabled -and -not $Disable)
+    $arguments=@('eq',[string]$enabled)+@($eq.bands | ForEach-Object {[string]$_})
+    if($eq.frequencies_hz.Count -eq $eq.bands.Count){$arguments+=@($eq.frequencies_hz | ForEach-Object {[string]$_})}
+    Run-Exe (Join-Path $dir 'spectral_apo_runtime.exe') $arguments | Out-Null
+}
 function Get-Runtime([string]$dir) {
     $text=& (Join-Path $dir 'spectral_apo_runtime.exe') status
     return $text | ConvertFrom-Json
@@ -212,9 +219,14 @@ function Verify-Installed([string]$dir) {
     $tracePath=Join-Path $script:session 'audio.etl'
     & logman.exe start $traceName -ets -o $tracePath -p '{AE4BD3BE-F36F-45B6-8D21-BDD6FB832853}' '0x0200000000000000' 4 | Out-Null
     $traceStarted=$LASTEXITCODE -eq 0
-    $oldWord=(Get-Runtime $dir).settings
+    $previousRuntime=Get-Runtime $dir
+    $oldWord=$previousRuntime.settings
+    $oldEq=$previousRuntime.eq
     $summary=[ordered]@{endpoint=$endpoint;complete=$false;audiodg_processing_verified=$false;loopback_covers_efx=$false;loopback_covers_spectral=$false;latency_verified=$false;latency_failure=$null;software_delta_ms=$null;physical_latency_measured=$false;failure=$null}
     try {
+        if($oldEq.enabled){Set-Equalizer $dir $oldEq -Disable}
+        # Measurements require constant gain; restore the complete word in finally.
+        Set-Word $dir ([uint32]([uint64]$oldWord -band 536870911))
         $full=$null;$quarter=$null
         foreach($candidate in @('CompositeMFX','CompositeEFX','EFX')){
             $script:strategy=$candidate
@@ -266,7 +278,7 @@ function Verify-Installed([string]$dir) {
         }catch{$summary.latency_failure=$_.Exception.Message;Write-Warning ('Processing verified; latency unavailable: '+$summary.latency_failure)}
     }catch{$summary.failure=$_.Exception.Message;Write-Warning $summary.failure}
     finally {
-        try{Set-Word $dir $oldWord;Rebuild-Graph {if($summary.audiodg_processing_verified -and $summary.loopback_covers_spectral){Set-Association DSP;$summary.active_association='DSP'}else{Set-Association Restore;$summary.active_association='Original'}};Save-Diagnostics $dir}catch{$summary.failure=[string]$summary.failure+'; restore: '+$_.Exception.Message;$summary.complete=$false}
+        try{Set-Word $dir $oldWord;if($oldEq.enabled){Set-Equalizer $dir $oldEq};Rebuild-Graph {if($summary.audiodg_processing_verified -and $summary.loopback_covers_spectral){Set-Association DSP;$summary.active_association='DSP'}else{Set-Association Restore;$summary.active_association='Original'}};Save-Diagnostics $dir}catch{$summary.failure=[string]$summary.failure+'; restore: '+$_.Exception.Message;$summary.complete=$false}
         $modules=@(foreach($process in (Get-Process audiodg -ErrorAction SilentlyContinue)){try{[ordered]@{pid=$process.Id;modules=@($process.Modules | Select-Object ModuleName,FileName)}}catch{[ordered]@{pid=$process.Id;error=$_.Exception.Message}}})
         Json-Write $modules (Join-Path $script:session 'audiodg-modules.json')
         if($traceStarted){& logman.exe stop $traceName -ets | Out-Null;& tracerpt.exe $tracePath -o (Join-Path $script:session 'audio.xml') -of XML -y | Out-Null}
@@ -328,9 +340,18 @@ try {
         $dir=Join-Path $installRoot $build;Protect-Directory $dir
         foreach($file in $manifest.PSObject.Properties){$target=Join-Path $dir $file.Name;if(-not(Test-Path -LiteralPath $target) -or (Get-FileHash -LiteralPath $target).Hash -ne $file.Value){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file.Name) -Destination $dir -Force}}
         Copy-Item (Join-Path $PSScriptRoot 'payload-sha256.json') $dir -Force
-        $savedWord=97538
-        if(Test-Path $record){$savedWord=(Get-Runtime (Get-Installed).directory).settings}
-        elseif(Test-Path $runtime){$savedRuntime=Get-Runtime $PSScriptRoot;if($savedRuntime.error -eq 0){$savedWord=$savedRuntime.settings}}
+        $savedWord=97538;$savedEq=$null
+        $savedRuntime=$null
+        if(Test-Path $record){$savedRuntime=Get-Runtime (Get-Installed).directory}
+        elseif(Test-Path $runtime){$savedRuntime=Get-Runtime $PSScriptRoot}
+        if($savedRuntime -and $savedRuntime.error -eq 0){
+            $savedWord=$savedRuntime.settings;$savedEq=$savedRuntime.eq
+            # An older installed CLI cannot decode EQ settings in the shared v2 file.
+            if($null -eq $savedEq -and (Test-Path $runtime)){
+                $upgradeRuntime=Get-Runtime $PSScriptRoot
+                if($upgradeRuntime.error -eq 0){$savedEq=$upgradeRuntime.eq}
+            }
+        }
         $before=Read-Fx
         Ensure-SpectralBackup
         $registryKeys=@(foreach($id in @($dsp,$unity)){"SOFTWARE\Classes\CLSID\$id";"SOFTWARE\Classes\AudioEngine\AudioProcessingObjects\$id"})
@@ -358,7 +379,7 @@ try {
                 $p=Start-Process "$env:windir\System32\regsvr32.exe" -ArgumentList @('/s',('"'+(Join-Path $dir 'SpectralAudio.dll')+'"')) -WindowStyle Hidden -Wait -PassThru
                 if($p.ExitCode){throw "DLL registration failed: $($p.ExitCode)"}
                 if(Test-Path $runtime){Move-Item -LiteralPath $runtime -Destination (Join-Path $rollback 'previous-runtime.bin');$script:runtimeMoved=$true}
-                Run-Exe (Join-Path $dir 'spectral_apo_runtime.exe') @('init') | Out-Null;Runtime-ACL;Set-Word $dir $savedWord
+                Run-Exe (Join-Path $dir 'spectral_apo_runtime.exe') @('init') | Out-Null;Runtime-ACL;Set-Word $dir $savedWord;Set-Equalizer $dir $savedEq
                 $script:installTouchedChain=$true;Set-Association DSP
             }catch{
                 $failure=$_
@@ -370,11 +391,11 @@ try {
                 throw $failure
             }
         }
-        Json-Write @{directory=$dir;version='1.0.0';installed_at=(Get-Date -Format o);endpoint=$endpoint;endpoint_name=$endpointName;original_backup=$original;dll_sha256=(Get-FileHash (Join-Path $dir 'SpectralAudio.dll')).Hash} $record
+        Json-Write @{directory=$dir;version='1.1.0';installed_at=(Get-Date -Format o);endpoint=$endpoint;endpoint_name=$endpointName;original_backup=$original;dll_sha256=(Get-FileHash (Join-Path $dir 'SpectralAudio.dll')).Hash} $record
         $uninstallKey='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SpectralAudio'
         New-Item $uninstallKey -Force | Out-Null
         New-ItemProperty $uninstallKey DisplayName -Value 'Spectral Audio' -PropertyType String -Force | Out-Null
-        New-ItemProperty $uninstallKey DisplayVersion -Value '1.0.0' -PropertyType String -Force | Out-Null
+        New-ItemProperty $uninstallKey DisplayVersion -Value '1.1.0' -PropertyType String -Force | Out-Null
         $uninstallCommand='powershell.exe -NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $dir 'Open-SpectralAudio.ps1')+'" -Action Uninstall'
         New-ItemProperty $uninstallKey UninstallString -Value $uninstallCommand -PropertyType String -Force | Out-Null
         New-ItemProperty $uninstallKey NoModify -Value 1 -PropertyType DWord -Force | Out-Null

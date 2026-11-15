@@ -13,28 +13,40 @@ struct Settings {
     bool bypass = false;
     unsigned gain_milli = 1000; // 0..1000; output is always limited to [-1,1].
     unsigned strength_milli = 1000; // 0..2000; independent of output volume.
-    bool valid() const noexcept { return game < 5 && level < 5 && gain_milli <= 1000 && strength_milli <= 2000; }
+    unsigned drc_mode = 0; // 0=off, 1=default curve, 2..5=numbered curves.
+    bool valid() const noexcept { return game < 5 && level < 5 && gain_milli <= 1000 && strength_milli <= 2000 && drc_mode <= 5; }
     // Bit 27 marks explicit strength: low 10 bits in 17..26, high bit in 28.
     // Existing 0..100% words and the absent-marker default keep their wire identity.
+    // Bits 29..31 publish DRC with the same atomic parameter snapshot.
     uint32_t pack() const noexcept {
         return (game & 3u) | ((game & 4u) << 13) | ((level & 3u) << 2) |
                ((level & 4u) << 14) | (unsigned(bypass) << 4) | (gain_milli << 5) |
-               (strength_milli == 1000 ? 0u : (((strength_milli & 1023u) << 17) | ((strength_milli & 1024u) << 18) | (1u << 27)));
+               (strength_milli == 1000 ? 0u : (((strength_milli & 1023u) << 17) | ((strength_milli & 1024u) << 18) | (1u << 27))) |
+               (drc_mode << 29);
     }
     static Settings unpack(uint32_t v) noexcept {
         return {(v & 3u) | ((v >> 13) & 4u), ((v >> 2) & 3u) | ((v >> 14) & 4u),
                 bool(v & 16), (v >> 5) & 1023u,
-                (v & (1u << 27)) ? (((v >> 17) & 1023u) | ((v >> 18) & 1024u)) : 1000u};
+                (v & (1u << 27)) ? (((v >> 17) & 1023u) | ((v >> 18) & 1024u)) : 1000u,
+                v >> 29};
     }
+};
+
+struct EqualizerSettings {
+    std::array<int,Spectral_EQ_BANDS> bands{};
+    std::array<int,Spectral_EQ_BANDS> frequencies_hz{};
+    bool enabled = false;
+    uint32_t revision = 0;
 };
 
 class Processor {
 public:
     static constexpr size_t latency_frames = spectral::SingleClockCore::unity_delay_frames;
     static_assert(std::atomic<uint32_t>::is_always_lock_free, "RT settings require lock-free atomics");
-    explicit Processor(Settings s = {}) : core_(int(s.game), int(s.level)), settings_(s.pack()) {
+    explicit Processor(Settings s = {}, EqualizerSettings eq = {})
+        : core_(int(s.game), int(s.level)), settings_(s.pack()), equalizer_(eq) {
         if (!s.valid()) throw std::invalid_argument("Invalid APO settings");
-        reset();
+        if (!reset()) throw std::invalid_argument("Invalid APO equalizer settings");
     }
     bool publish(Settings s) noexcept {
         if (!s.valid() || !spectral_model_available(int(s.game),int(s.level))) return false;
@@ -42,14 +54,21 @@ public:
         return true;
     }
     uint32_t applied_settings() const noexcept { return active_.pack(); }
+    // Published by the same audio thread that calls process.
+    void publish_equalizer(const EqualizerSettings& eq) noexcept { equalizer_ = eq; }
+    uint32_t pending_eq_revision() const noexcept { return equalizer_.revision; }
+    uint32_t applied_eq_revision() const noexcept { return applied_eq_revision_; }
     // Host calls only while stopped/unlocked.
     bool reset() noexcept {
         dry_.fill(0); phase_ = dry_pos_ = 0; failed_ = false;
         active_ = Settings::unpack(settings_.load(std::memory_order_acquire));
         mix_ = active_.bypass ? 0.f : 1.f;
         gain_ = active_.gain_milli / 1000.f;
-        return core_.configure(int(active_.game), int(active_.level)) &&
-            core_.set_strength(active_.strength_milli / 1000.f) && core_.reset();
+        applied_eq_revision_ = equalizer_.revision;
+        return apply_equalizer() &&
+            core_.configure(int(active_.game), int(active_.level)) &&
+            core_.set_strength(active_.strength_milli / 1000.f) &&
+            core_.set_drc(active_.drc_mode) && core_.reset();
     }
     // silent input may have a null/poisoned pointer and must never be read.
     // Silent callbacks still advance STFT history and emit pending audio tails.
@@ -62,7 +81,12 @@ public:
                 if (next.game != active_.game || next.level != active_.level)
                     failed_ |= !core_.configure(int(next.game), int(next.level));
                 failed_ |= !core_.set_strength(next.strength_milli / 1000.f);
+                failed_ |= !core_.set_drc(next.drc_mode);
                 active_ = next;
+                if (equalizer_.revision != applied_eq_revision_) {
+                    failed_ |= !apply_equalizer();
+                    applied_eq_revision_ = equalizer_.revision;
+                }
             }
             float sample[2], wet[2], dry[2];
             for (size_t ch = 0; ch < 2; ++ch) {
@@ -93,9 +117,14 @@ public:
         return !failed_;
     }
 private:
+    bool apply_equalizer() noexcept {
+        return core_.set_eq(equalizer_.enabled ? equalizer_.bands.data() : nullptr, equalizer_.frequencies_hz.data());
+    }
     spectral::SingleClockCore core_;
     std::atomic<uint32_t> settings_;
     Settings active_{};
+    EqualizerSettings equalizer_{};
+    uint32_t applied_eq_revision_ = 0;
     std::array<float, latency_frames*2> dry_{};
     size_t phase_ = 0, dry_pos_ = 0;
     float mix_ = 1, gain_ = 1;

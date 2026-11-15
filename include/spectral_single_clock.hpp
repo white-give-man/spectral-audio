@@ -36,6 +36,14 @@ public:
         return spectral_stream_set_strength(stream_.get(), strength) == 0;
     }
 
+    bool set_drc(unsigned mode) noexcept {
+        return spectral_stream_set_drc(stream_.get(), mode) == 0;
+    }
+
+    bool set_eq(const int* bands, const int* frequencies_hz = nullptr) noexcept {
+        return spectral_stream_set_eq_frequencies(stream_.get(), bands, frequencies_hz) == 0;
+    }
+
     // Supports identical input/output pointers. Normal path does not allocate.
     // The production host must implement format, silent-buffer, tail/drain,
     // configuration publication, bypass, gain and fault handling separately.

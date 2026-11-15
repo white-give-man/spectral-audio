@@ -1,6 +1,6 @@
 #include <string>
 #include "contract.hpp"
-#include "processor.hpp"
+#include "runtime.hpp"
 #include <ks.h>
 #include <ksmedia.h>
 #include <cstdio>
@@ -46,6 +46,8 @@ int main(int argc,char** argv) {
     const auto get=reinterpret_cast<GetFactory>(GetProcAddress(dll,"DllGetClassObject"));
     const auto unload=reinterpret_cast<CanUnload>(GetProcAddress(dll,"DllCanUnloadNow"));
     check(get && unload,"COM exports");
+    auto runtime=std::make_unique<Runtime>();
+    check(runtime->open(true,true)==ERROR_SUCCESS,"create isolated runtime mapping");
     for (const bool unity : {true,false}) {
         IClassFactory* factory=nullptr;
         check(SUCCEEDED(get(unity?clsid_unity:clsid_dsp,IID_IClassFactory,reinterpret_cast<void**>(&factory))),"class factory");
@@ -116,6 +118,46 @@ int main(int argc,char** argv) {
         check(out.u32ValidFrameCount==0 && out.u32BufferFlags==BUFFER_INVALID,"reject oversized host buffer");
         Status status{};
         check(SUCCEEDED(control->GetStatus(&status)) && status.locked && status.frames==4096+1024+512 && status.faults==1,"instance status");
+        if (!unity) {
+            check(SUCCEEDED(apo->Reset()) && reference.reset(),"reset before live EQ");
+            EqualizerSettings eq;
+            eq.enabled=true; eq.bands={-600,23,0,0,600,0,0,0,0,-1};
+            eq.frequencies_hz={20,1250,0,0,8016,0,0,0,0,20000};
+            check(runtime->write_equalizer(eq)==ERROR_SUCCESS && eq.revision==1,"publish EQ to running APO");
+            EqualizerSettings saved;
+            check(runtime->read_equalizer(saved) && saved.enabled && saved.bands==eq.bands && saved.frequencies_hz==eq.frequencies_hz,
+                "signed EQ IPC round trip");
+            reference.publish_equalizer(eq);
+            check(reference.process(input.data(),expected.data(),4096,false,silent),"live EQ reference");
+            for(size_t frame=0;frame<4096;frame+=1024) {
+                in={reinterpret_cast<UINT_PTR>(input.data()+2*frame),1024,BUFFER_VALID,APO_CONNECTION_PROPERTY_SIGNATURE};
+                out.pBuffer=reinterpret_cast<UINT_PTR>(output.data()+2*frame);
+                rt->APOProcess(1,ip,1,op);
+            }
+            check(output==expected,"mapped EQ applies to locked APO output");
+            bool acknowledged=false;
+            for (const auto& slot: runtime->data->slots)
+                if (slot.owner && !slot.unity && slot.eq_revision==eq.revision) acknowledged=true;
+            check(acknowledged,"locked APO acknowledges EQ revision");
+            for (size_t i=0;i<input.size();++i) input[i]=float(int(i%199)-99)*.008f;
+            for (unsigned mode=1;mode<=5;++mode) {
+                const Settings compressed{2,4,false,1000,1000,mode};
+                check(SUCCEEDED(control->SetSettings(compressed.pack())) && reference.publish(compressed),"publish live DRC");
+                // Both processors have the same history; do not reset here, so
+                // this covers transitions between curves while already locked.
+                check(reference.process(input.data(),expected.data(),4096,false,silent),"live DRC reference");
+                for(size_t frame=0;frame<4096;frame+=1024) {
+                    in={reinterpret_cast<UINT_PTR>(input.data()+2*frame),1024,BUFFER_VALID,APO_CONNECTION_PROPERTY_SIGNATURE};
+                    out.pBuffer=reinterpret_cast<UINT_PTR>(output.data()+2*frame);
+                    rt->APOProcess(1,ip,1,op);
+                }
+                check(output==expected,"mapped DRC applies to locked APO output with EQ");
+                bool applied=false;
+                for (const auto& slot:runtime->data->slots)
+                    if (slot.owner && !slot.unity && slot.settings==compressed.pack()) applied=true;
+                check(applied,"locked APO acknowledges DRC mode");
+            }
+        }
         check(SUCCEEDED(control->SetSettings(Settings{2,4,true,500}.pack())),"publish runtime settings");
         check(SUCCEEDED(config->UnlockForProcess()),"unlock");
         check(SUCCEEDED(config->LockForProcess(1,ins,1,outs)),"relock fresh state");
@@ -197,5 +239,7 @@ int main(int argc,char** argv) {
         std::printf("PASS engine_init=%s\n",discovery?"discovery-only":"RAW");
     }
     FreeLibrary(dll); CoUninitialize();
+    runtime.reset();
+    check(DeleteFileW(isolated.c_str())!=0,"remove isolated runtime");
     std::puts("Isolated DLL ABI test only; no endpoint association or audiodg measurement.");
 }

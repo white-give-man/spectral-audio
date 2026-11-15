@@ -35,6 +35,14 @@ int main() {
     }
     require(Settings::unpack(97538).strength_milli == 1000 && Settings{}.pack() == 97538,
             "legacy settings retain full strength and wire identity");
+    for (unsigned mode=0;mode<=5;++mode) for (unsigned strength: {0u,600u,1000u,2000u}) {
+        const Settings value{2,4,false,735,strength,mode};
+        const auto decoded=Settings::unpack(value.pack());
+        require(decoded.valid() && decoded.drc_mode==mode && decoded.strength_milli==strength &&
+            decoded.gain_milli==735 && decoded.game==2 && decoded.level==4,"DRC packing preserves every other control");
+    }
+    require(!Settings::unpack(Settings{}.pack() | (6u<<29)).valid() &&
+        !Settings::unpack(Settings{}.pack() | (7u<<29)).valid(),"reserved DRC settings rejected");
     for (unsigned strength=0; strength<=2000; ++strength) {
         Settings s{2,4,false,735,strength};
         const auto d=Settings::unpack(s.pack());
@@ -154,6 +162,113 @@ int main() {
     for (size_t i=0;i<result.size();++i)
         require(std::isfinite(result[i]) && result[i]==std::clamp(reference[i],-1.f,1.f),
                 "maximum APO strength matches the core with output limiting");
+    // An exact-bin tone reaches the requested gain on both channels without
+    // shifting latency. A second tone exercises the cut and filter independence.
+    spectral::SingleClockCore flat_eq{2,4,true}, shaped_eq{2,4,true};
+    int bands[Spectral_EQ_BANDS]{};
+    bands[3]=600;
+    bands[8]=-400;
+    require(shaped_eq.set_eq(bands) && shaped_eq.reset(),"valid EQ reaches the core");
+    bands[0]=601;
+    require(!shaped_eq.set_eq(bands) && spectral_stream_set_eq(nullptr,nullptr)!=0,"invalid EQ rejected");
+    for (size_t f=0; f<frames; ++f) {
+        input[2*f]=float(.01*std::sin(2*std::acos(-1.)*11*f/1024));
+        input[2*f+1]=float(.01*std::sin(2*std::acos(-1.)*171*f/1024));
+    }
+    require(flat_eq.process(input.data(),reference.data(),frames) &&
+        shaped_eq.process(input.data(),result.data(),frames),"render EQ response");
+    double amplitudes[2]{}, baseline[2]{};
+    for (size_t f=4096; f<frames; ++f) for (size_t ch=0; ch<2; ++ch) {
+        const double phase=2*std::acos(-1.)*(11+160*ch)*f/1024;
+        amplitudes[ch]+=result[2*f+ch]*std::sin(phase);
+        baseline[ch]+=reference[2*f+ch]*std::sin(phase);
+    }
+    require(amplitudes[0]/baseline[0]>1.90 && amplitudes[0]/baseline[0]<2.02 &&
+        amplitudes[1]/baseline[1]>.62 && amplitudes[1]/baseline[1]<.65,
+        "peaking EQ boosts near 500 Hz and cuts at 8 kHz");
+
+    spectral::SingleClockCore moved_eq{2,4,true};
+    int centers[Spectral_EQ_BANDS]{};
+    bands[0]=0; bands[8]=0; centers[3]=8016;
+    require(moved_eq.set_eq(bands, centers) && moved_eq.reset(),"move the 500 Hz band to 8016 Hz");
+    centers[3]=20001;
+    require(!moved_eq.set_eq(bands, centers),"reject out-of-range center");
+    require(moved_eq.process(input.data(),result.data(),frames),"render moved center");
+    double moved_amplitudes[2]{};
+    for (size_t f=4096; f<frames; ++f) for (size_t ch=0; ch<2; ++ch) {
+        const double phase=2*std::acos(-1.)*(11+160*ch)*f/1024;
+        moved_amplitudes[ch]+=result[2*f+ch]*std::sin(phase);
+    }
+    require(moved_amplitudes[0]/baseline[0]>.99 && moved_amplitudes[0]/baseline[0]<1.02 &&
+        moved_amplitudes[1]/baseline[1]>1.97 && moved_amplitudes[1]/baseline[1]<2.02,
+        "boost follows the new center frequency");
+
+    Processor eq_a, eq_b;
+    require(eq_a.process(input.data(),result.data(),37,false,silent) &&
+        eq_b.process(input.data(),reference.data(),37,false,silent),"prefix before live EQ change");
+    EqualizerSettings eq;
+    eq.enabled=true; eq.revision=7; eq.bands[4]=600; eq.frequencies_hz[4]=515;
+    eq_a.publish_equalizer(eq); eq_b.publish_equalizer(eq);
+    require(eq_a.applied_eq_revision()==0,"EQ defers application until next hop");
+    track=true;
+    const bool live_eq_ok=eq_a.process(input.data()+74,result.data()+74,frames-37,false,silent);
+    track=false;
+    require(live_eq_ok && allocations==0 && eq_a.applied_eq_revision()==7,"live EQ applies without allocating");
+    for (size_t f=37; f<frames; ++f)
+        require(eq_b.process(input.data()+2*f,reference.data()+2*f,1,false,silent),"fragmented EQ update");
+    require(result==reference,"live EQ sample timing independent of callback fragmentation");
+    Processor eq_bypass({2,4,true,1000},eq), flat_bypass({2,4,true,1000});
+    require(eq_bypass.process(input.data(),result.data(),frames,false,silent) &&
+        flat_bypass.process(input.data(),reference.data(),frames,false,silent) && result==reference,
+        "restoring original sound bypasses model and EQ");
+
+    std::printf("PASS EQ live updates, stereo response, and bypass\n");
+    // Loud stereo input exercises compression, live controls, dry bypass and
+    // tails across irregular callbacks, with the model and EQ both running.
+    for (size_t f=0;f<frames;++f) {
+        input[2*f]=float(.8*std::sin(2*std::acos(-1.)*11*f/1024));
+        input[2*f+1]=input[2*f]*.25f;
+    }
+    eq.enabled=true; eq.bands.fill(0); eq.bands[3]=200;
+    for (unsigned mode=1;mode<=5;++mode) {
+        const Settings compressed{2,4,false,1000,1000,mode};
+        Processor linked(compressed,eq),fragmented(compressed,eq),uncompressed({},eq);
+        require(linked.process(input.data(),reference.data(),frames,false,silent),"DRC full-block model render");
+        track=true;
+        size_t at=0, block=0;
+        const auto& pattern=patterns.back();
+        while (at<frames) {
+            const auto n=std::min(pattern[block++%pattern.size()],frames-at);
+            require(fragmented.process(input.data()+2*at,result.data()+2*at,n,false,silent),"fragmented DRC render");
+            at+=n;
+        }
+        track=false;
+        require(allocations==0 && result==reference,"DRC fragmentation is exact and allocation free");
+        result=input;
+        require(fragmented.reset() && fragmented.process(result.data(),result.data(),frames,false,silent) &&
+            result==reference,"DRC in-place and reset identity");
+        require(uncompressed.process(input.data(),result.data(),frames,false,silent) && result!=reference,
+            "DRC changes the model input/output");
+        Processor bypassed({2,4,true,1000,1000,mode},eq);
+        require(bypassed.process(input.data(),result.data(),frames,false,silent),"DRC dry bypass");
+        for (size_t f=Processor::latency_frames;f<frames;++f)
+            require(result[2*f]==input[2*(f-Processor::latency_frames)] &&
+                result[2*f+1]==input[2*(f-Processor::latency_frames)+1],"original sound bypasses DRC too");
+    }
+    Processor live_a,live_b;
+    require(live_a.process(input.data(),result.data(),37,false,silent) &&
+        live_b.process(input.data(),reference.data(),37,false,silent),"DRC live prefix");
+    require(live_a.publish({2,4,false,1000,1000,5}) && live_b.publish({2,4,false,1000,1000,5}),"enable live DRC");
+    require(live_a.process(input.data()+74,result.data()+74,frames-37,false,silent),"DRC live suffix");
+    for (size_t f=37;f<frames;++f)
+        require(live_b.process(input.data()+2*f,reference.data()+2*f,1,false,silent),"DRC live fragmented suffix");
+    require(result==reference && Settings::unpack(live_a.applied_settings()).drc_mode==5,
+        "live DRC control applied at hop boundary");
+    require(live_a.process(nullptr,tail.data(),2048,true,silent) &&
+        live_b.process(zeros.data(),zero_tail.data(),2048,false,other) && tail==zero_tail,"DRC silent input preserves tails");
+    require(live_a.process(nullptr,tail.data(),2048,true,silent) && silent,"DRC tail drains to silence");
+    require(!live_a.publish({2,4,false,1000,1000,6}),"invalid DRC publication rejected");
+    std::puts("PASS DRC realtime controls, allocation-free streaming, reset, tails and original sound");
     std::printf("PASS strength_values=2001 processor_cases=%zu streaming_bit_identity=1 latency_frames=%zu allocations=%zu\n",
         cases,Processor::latency_frames,allocations);
 }

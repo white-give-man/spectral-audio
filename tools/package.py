@@ -17,7 +17,7 @@ args = parser.parse_args()
 needles = json.loads(args.policy.read_text()) if args.policy else []
 source_names = read_source_list(root)
 model_report = audit_models(root)
-name = 'SpectralAudio-win11-x64-1.0.0'
+name = 'SpectralAudio-win11-x64-1.1.0'
 dist = root / 'dist'
 dist.mkdir(exist_ok=True)
 
@@ -58,7 +58,7 @@ exit /b %SpectralExit%
         for file, digest in manifest.items():
             if hashlib.sha256(archive.read(name + '/' + file)).hexdigest().upper() != digest:
                 raise ValueError('Payload hash mismatch: ' + file)
-    source_zip = stage / 'SpectralAudio-source-1.0.0.zip'
+    source_zip = stage / 'SpectralAudio-source-1.1.0.zip'
     with zipfile.ZipFile(source_zip, 'w', zipfile.ZIP_DEFLATED) as archive:
         for entry in source_names:
             archive.write(root / entry, arcname='spectral-audio/' + entry)

@@ -22,6 +22,77 @@ namespace SpectralTheme {
   protected override void OnPaint(PaintEventArgs e){e.Graphics.Clear(Color.FromArgb(33,40,46));using(var b=new SolidBrush(Color.FromArgb(115,229,192)))e.Graphics.FillRectangle(b,offset-120,0,120,Height);}
   protected override void Dispose(bool disposing){if(disposing)timer.Dispose();base.Dispose(disposing);}
  }
+ public class EqFrequencyInput : TextBox {
+  protected override bool IsInputKey(Keys keyData) {
+   Keys key=keyData&Keys.KeyCode;
+   return key==Keys.Enter||key==Keys.Escape||base.IsInputKey(keyData);
+  }
+ }
+ public class EqFader : Control {
+  int gain;
+  static readonly Color Surface=Color.FromArgb(25,30,35);
+  static readonly Color Accent=Color.FromArgb(115,229,192);
+  static readonly Color Muted=Color.FromArgb(115,132,141);
+  public event EventHandler ValueChanged;
+  public EqFader(){
+   SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.Selectable,true);
+   TabStop=true; Cursor=Cursors.Hand; AccessibleRole=AccessibleRole.Slider;
+  }
+  public int Value {
+   get { return gain; }
+   set {
+    int next=Math.Max(-600,Math.Min(600,value));
+    if(gain==next)return;
+    gain=next;Invalidate();if(ValueChanged!=null)ValueChanged(this,EventArgs.Empty);
+   }
+  }
+  int Inset { get { return Math.Max(8,Width/6); } }
+  int Travel { get { return Math.Max(1,Height-2*Inset-1); } }
+  void MoveTo(int y) { Value=10*(int)Math.Round(60-(y-Inset)*120.0/Travel); }
+  protected override void OnMouseDown(MouseEventArgs e){
+   base.OnMouseDown(e);if(e.Button==MouseButtons.Left){Focus();Capture=true;MoveTo(e.Y);}
+  }
+  protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);if(Capture)MoveTo(e.Y);}
+  protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);if(e.Button==MouseButtons.Left)Capture=false;}
+  protected override void OnMouseWheel(MouseEventArgs e){base.OnMouseWheel(e);if(Focused)Value+=10*Math.Sign(e.Delta);}
+  protected override bool IsInputKey(Keys key){
+   switch(key&Keys.KeyCode){
+    case Keys.Up:case Keys.Down:case Keys.Left:case Keys.Right:case Keys.Home:case Keys.End:return true;
+    default:return base.IsInputKey(key);
+   }
+  }
+  protected override void OnKeyDown(KeyEventArgs e){
+   base.OnKeyDown(e);
+   int step=e.Control?1:10;
+   switch(e.KeyCode){
+    case Keys.Up:case Keys.Right:Value+=step;break;
+    case Keys.Down:case Keys.Left:Value-=step;break;
+    case Keys.Home:Value=0;break;
+    case Keys.End:Value=-600;break;
+    default:return;
+   }
+   e.Handled=true;
+  }
+  protected override void OnGotFocus(EventArgs e){base.OnGotFocus(e);Invalidate();}
+  protected override void OnLostFocus(EventArgs e){base.OnLostFocus(e);Invalidate();}
+  public bool Active { get; set; }
+  protected override void OnPaint(PaintEventArgs e){
+   var g=e.Graphics;g.Clear(Surface);g.SmoothingMode=SmoothingMode.AntiAlias;
+   float x=Width/2f,y0=Inset+Travel/2f,y=Inset+Travel*(600-gain)/1200f;
+   int diameter=Math.Max(12,Width/4);
+   using(var tick=new Pen(Color.FromArgb(53,66,74))){
+    g.DrawLine(tick,0,Inset,Width,Inset);
+    g.DrawLine(tick,0,Height-Inset-1,Width,Height-Inset-1);
+   }
+   using(var zero=new Pen(Color.FromArgb(79,102,111)))g.DrawLine(zero,0,y0,Width,y0);
+   using(var rail=new Pen(Color.FromArgb(65,78,85),Math.Max(3,Width/13)))g.DrawLine(rail,x,Inset,x,Height-Inset-1);
+   Color color=Active?Accent:Muted;
+   using(var fill=new Pen(color,Math.Max(3,Width/13)))g.DrawLine(fill,x,y0,x,y);
+   using(var knob=new SolidBrush(color))g.FillEllipse(knob,x-diameter/2f,y-diameter/2f,diameter,diameter);
+   if(Focused)using(var focus=new Pen(Color.FromArgb(232,239,241)))
+    g.DrawEllipse(focus,x-diameter/2f-3,y-diameter/2f-3,diameter+6,diameter+6);
+  }
+ }
  public static class Native {
   [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h,int a,ref int v,int s);
   public static void Dark(IntPtr h){try{int v=1;DwmSetWindowAttribute(h,20,ref v,4);}catch{}}
@@ -38,13 +109,14 @@ $script:SpectralAccent=[Drawing.Color]::FromArgb(115,229,192)
 function New-SpectralCard($parent,[int]$x,[int]$y,[int]$w,[int]$h){
  $c=New-Object SpectralTheme.Card;$c.SetBounds($x,$y,$w,$h);$parent.Controls.Add($c);$c.SendToBack();return $c
 }
-function Set-SpectralTheme($root,$primary){
+function Set-SpectralTheme($root,$primary,$parentCards){
  $root.BackColor=$script:SpectralBackground;$root.ForeColor=$script:SpectralInk
  $controls=@($root.Controls)
  $cards=@($controls | Where-Object {$_ -is [SpectralTheme.Card]})
  foreach($c in $controls){
   if($c -isnot [SpectralTheme.Card]){
-   foreach($card in $cards){
+   $candidates=if($parentCards -and $parentCards.ContainsKey($c)){$parentCards[$c]}else{$cards}
+   foreach($card in $candidates){
     if($card.Bounds.Contains($c.Bounds)){
      $location=New-Object Drawing.Point(($c.Left-$card.Left),($c.Top-$card.Top))
      $c.Parent=$card;$c.Location=$location;break
@@ -76,7 +148,7 @@ function Set-SpectralTheme($root,$primary){
  $root.Add_HandleCreated({param($sender,$e) [SpectralTheme.Native]::Dark($sender.Handle)})
 }
 function Add-SpectralHeader($form,[string]$subtitle){
- $logo=New-Object Windows.Forms.Label;$logo.Text='Spectral';$logo.SetBounds(24,22,46,46);$logo.TextAlign='MiddleCenter';$logo.Font=New-Object Drawing.Font('Microsoft YaHei UI',17,[Drawing.FontStyle]::Bold)
+ $logo=New-Object Windows.Forms.Label;$logo.Text='S';$logo.SetBounds(24,22,46,46);$logo.TextAlign='MiddleCenter';$logo.Font=New-Object Drawing.Font('Microsoft YaHei UI',17,[Drawing.FontStyle]::Bold)
  $form.Controls.Add($logo);$logo.BackColor=$script:SpectralAccent;$logo.ForeColor=$script:SpectralBackground
  $name=New-Object Windows.Forms.Label;$name.Text='Spectral AUDIO';$name.SetBounds(86,17,270,32);$name.Font=New-Object Drawing.Font('Microsoft YaHei UI',18,[Drawing.FontStyle]::Bold);$name.BackColor=$script:SpectralBackground;$name.ForeColor=$script:SpectralInk;$form.Controls.Add($name)
  $sub=New-Object Windows.Forms.Label;$sub.Text=$subtitle;$sub.SetBounds(87,53,620,24);$sub.Font=New-Object Drawing.Font('Microsoft YaHei UI',9);$sub.BackColor=$script:SpectralBackground;$sub.ForeColor=$script:SpectralMuted;$form.Controls.Add($sub)

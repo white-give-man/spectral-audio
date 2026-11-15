@@ -205,7 +205,9 @@ public:
             return APOERR_INVALID_OUTPUT_MAXFRAMECOUNT;
         try {
             if (!unity_ && !raw_) {
-                processor_ = std::make_unique<Processor>(Settings::unpack(settings_.load()));
+                EqualizerSettings eq;
+                runtime_.read_equalizer(eq);
+                processor_ = std::make_unique<Processor>(Settings::unpack(settings_.load()), eq);
 
             }
         } catch (...) { return E_OUTOFMEMORY; }
@@ -244,6 +246,9 @@ public:
             const auto setting=Settings::unpack(word);
             if(setting.valid() && spectral_model_available(int(setting.game),int(setting.level))) settings_.store(word,std::memory_order_release);
             processor_->publish(Settings::unpack(settings_.load(std::memory_order_acquire)));
+            EqualizerSettings eq;
+            const auto pending = processor_->pending_eq_revision();
+            if (runtime_.read_equalizer(eq, &pending)) processor_->publish_equalizer(eq);
             if (!processor_->process(input, output, n, silent, silent)) ++faults_;
         } else if (n) {
             if (silent) std::fill_n(output, size_t(n)*2, 0.f);
@@ -263,6 +268,7 @@ public:
             t.callbacks=callbacks_.load(); t.frames=frames_.load(); t.faults=faults_.load();
             t.max_ticks=max_ticks_.load(); t.frequency=frequency_; t.heartbeat=GetTickCount64();
             t.settings=processor_ ? processor_->applied_settings() : settings_.load();
+            t.eq_revision=processor_ ? processor_->applied_eq_revision() : 0;
             runtime_.end();
         }
     }

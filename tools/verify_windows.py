@@ -14,6 +14,29 @@ report={'environment':'Wine compatibility execution on Linux; no Windows audio d
 catalog=json.loads(execute('spectral_apo_runtime.exe','models'))
 assert len(catalog)==25 and [s for s in catalog if s['available']]==[{'game':2,'level':4,'available':True}]
 report['model_slots']=25;report['available_slots']=[{'game':2,'level':4}]
+report['dynamics']=execute('spectral_dynamics_unit.exe')
+with tempfile.TemporaryDirectory(prefix='spectral-runtime-') as folder:
+ profile=Path(folder)/'runtime.bin'
+ old=os.environ.get('SpectralAudio_TEST_RUNTIME')
+ os.environ['SpectralAudio_TEST_RUNTIME']=('Z:'+str(profile).replace('/','\\')) if args.wine else str(profile)
+ try:
+  initial=json.loads(execute('spectral_apo_runtime.exe','init'))
+  assert initial['settings']==97538 and not initial['drc']['enabled']
+  for mode in range(5):
+   state=json.loads(execute('spectral_apo_runtime.exe','drc',1,mode))
+   assert state['settings']==(97538|((mode+1)<<29)) and state['drc']=={'enabled':True,'mode':mode}
+   assert json.loads(execute('spectral_apo_runtime.exe','status'))['settings']==state['settings']
+  execute('spectral_apo_runtime.exe','drc',1,5,expected=2)
+  execute('spectral_apo_runtime.exe','drc',2,0,expected=2)
+  execute('spectral_apo_runtime.exe','set',97538|(6<<29),expected=2)
+  execute('spectral_apo_runtime.exe','set','4294967296',expected=2)
+  execute('spectral_apo_runtime.exe','set','-1',expected=2)
+  state=json.loads(execute('spectral_apo_runtime.exe','drc',0,0))
+  assert state['settings']==97538 and not state['drc']['enabled']
+  report['drc_runtime_modes']=5
+ finally:
+  if old is None:os.environ.pop('SpectralAudio_TEST_RUNTIME',None)
+  else:os.environ['SpectralAudio_TEST_RUNTIME']=old
 torch.set_num_threads(1);rng=np.random.default_rng(413)
 f=rng.uniform(0,1e5,(1024,64)).astype('float32');f[:128]=0
 with tempfile.TemporaryDirectory(prefix='spectral-probe-') as folder:

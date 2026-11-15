@@ -1,39 +1,49 @@
 {
   "feature_frames": 1152,
-  "log_gain_max_absolute_error": 1.5497207641601562e-06,
-  "log_gain_mean_absolute_error": 9.927176591872922e-08,
+  "log_gain_max_absolute_error": 1.4007091522216797e-06,
+  "log_gain_mean_absolute_error": 1.1627081164533593e-07,
   "pcm_cases": [
     {
       "case": "tones_noise_and_silence",
       "samples_per_channel": 81920,
-      "max_absolute_error": 8.936922112068313e-09,
-      "rms_error": 1.024651029432362e-09,
-      "native_seconds": 0.03826779999999985,
+      "max_absolute_error": 1.4716914069345943e-08,
+      "rms_error": 1.2467271468696316e-09,
+      "native_seconds": 0.02000623800267931,
       "audio_seconds": 1.7066666666666668,
-      "realtime_factor": 0.022422539062499913,
+      "realtime_factor": 0.011722405079694909,
       "stereo_independence": true
     }
   ],
   "strength_cases": [
     {
       "strength": 0.0,
-      "max_absolute_error": 6.12518565729081e-09,
-      "rms_error": 9.912051106406825e-10
+      "max_absolute_error": 7.2083841951009475e-09,
+      "rms_error": 1.178125681698528e-09
     },
     {
       "strength": 0.6,
-      "max_absolute_error": 6.12518565729081e-09,
-      "rms_error": 1.000300017831732e-09
+      "max_absolute_error": 7.969003457120039e-09,
+      "rms_error": 1.1971818893455497e-09
     },
     {
       "strength": 0.735,
-      "max_absolute_error": 6.184334613856812e-09,
-      "rms_error": 1.0051319781822877e-09
+      "max_absolute_error": 9.097945896652249e-09,
+      "rms_error": 1.2095372917367584e-09
     },
     {
       "strength": 1.0,
-      "max_absolute_error": 8.936922112068313e-09,
-      "rms_error": 1.024651029432362e-09
+      "max_absolute_error": 1.4716914069345943e-08,
+      "rms_error": 1.2467271468696316e-09
+    },
+    {
+      "strength": 1.5,
+      "max_absolute_error": 2.3639945265219175e-08,
+      "rms_error": 1.3841593417952068e-09
+    },
+    {
+      "strength": 2.0,
+      "max_absolute_error": 4.020122520986824e-08,
+      "rms_error": 1.674013717269897e-09
     }
   ]
 }
